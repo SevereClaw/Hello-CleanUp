@@ -1,0 +1,57 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Build
+        run: dotnet build src/HelloCleanUp/HelloCleanUp.csproj -c Release
+
+      - name: Read version
+        id: ver
+        shell: pwsh
+        run: |
+          [xml]$proj = Get-Content src/HelloCleanUp/HelloCleanUp.csproj
+          $v = ($proj.Project.PropertyGroup | Where-Object { $_.Version } | Select-Object -First 1).Version
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item src/HelloCleanUp/bin/Release/net48/HelloCleanUp.exe out/HelloCleanUp.exe
+          Get-Item out/HelloCleanUp.exe | Format-List Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HelloCleanUp-${{ steps.ver.outputs.version }}
+          path: out/HelloCleanUp.exe
+
+      - name: Publish release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "v${{ steps.ver.outputs.version }}"
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag out/HelloCleanUp.exe --clobber
+          } else {
+            gh release create $tag out/HelloCleanUp.exe --title "Hello, CleanUp. $tag" --notes-file RELEASE_NOTES.md
+          }

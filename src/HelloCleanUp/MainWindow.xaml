@@ -1,0 +1,214 @@
+<Window x:Class="HelloCleanUp.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Hello, CleanUp."
+        Width="1120" Height="740" MinWidth="960" MinHeight="620"
+        WindowStartupLocation="CenterScreen"
+        WindowStyle="None" ResizeMode="CanResize"
+        Background="{StaticResource Ink}"
+        FontFamily="{StaticResource UiFont}"
+        TextOptions.TextFormattingMode="Display"
+        UseLayoutRounding="True"
+        Icon="Assets/app.ico">
+
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="40" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False" />
+    </WindowChrome.WindowChrome>
+
+    <Grid x:Name="RootGrid">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="270" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <!-- soft vignette -->
+        <Rectangle Grid.ColumnSpan="2" IsHitTestVisible="False">
+            <Rectangle.Fill>
+                <RadialGradientBrush Center="0.6,0.35" GradientOrigin="0.6,0.35" RadiusX="0.9" RadiusY="0.9">
+                    <GradientStop Color="#1A1219" Offset="0" />
+                    <GradientStop Color="#0D0A0E" Offset="1" />
+                </RadialGradientBrush>
+            </Rectangle.Fill>
+        </Rectangle>
+
+        <!-- ======================================================== sidebar -->
+        <Border Grid.Column="0" Background="{StaticResource Paper}" BorderBrush="{StaticResource Line}" BorderThickness="0,0,1,0">
+            <Grid>
+                <!-- puppet strings -->
+                <Canvas IsHitTestVisible="False" ClipToBounds="True">
+                    <Line X1="40"  Y1="0" X2="40"  Y2="72"  Stroke="#3A2E37" StrokeThickness="1" />
+                    <Line X1="118" Y1="0" X2="118" Y2="34"  Stroke="#3A2E37" StrokeThickness="1" />
+                    <Line X1="196" Y1="0" X2="196" Y2="58"  Stroke="#3A2E37" StrokeThickness="1" />
+                    <Line X1="236" Y1="0" X2="236" Y2="22"  Stroke="#3A2E37" StrokeThickness="1" />
+                    <Path Data="M36,72 L44,72 M40,68 L40,76" Stroke="{StaticResource PinkDim}" StrokeThickness="1.5" />
+                    <Path Data="M114,34 L122,34 M118,30 L118,38" Stroke="{StaticResource PinkDim}" StrokeThickness="1.5" />
+                    <Path Data="M192,58 L200,58 M196,54 L196,62" Stroke="{StaticResource PinkDim}" StrokeThickness="1.5" />
+                    <Ellipse Canvas.Left="233" Canvas.Top="22" Width="6" Height="6" Fill="{StaticResource BloodDark}" />
+                </Canvas>
+
+                <DockPanel Margin="0,92,0,18">
+                    <StackPanel DockPanel.Dock="Top" Margin="26,0,20,30">
+                        <TextBlock Text="Hello, CleanUp." FontFamily="{StaticResource HandFont}" FontSize="25" Foreground="{StaticResource Pink}" />
+                        <TextBlock x:Name="GreetingText" Text="Hello, user." FontFamily="{StaticResource HandFont}" FontSize="13"
+                                   Foreground="{StaticResource Muted}" Margin="2,6,0,0" />
+                        <TextBlock Text="давай уберём лишнее." FontFamily="{StaticResource HandFont}" FontSize="13"
+                                   Foreground="{StaticResource Muted}" Margin="2,0,0,0" />
+                    </StackPanel>
+
+                    <TextBlock DockPanel.Dock="Bottom" x:Name="VersionText" Margin="26,0,0,0" FontSize="11"
+                               Foreground="#5E525B" FontFamily="{StaticResource MonoFont}" />
+
+                    <StackPanel>
+                        <RadioButton x:Name="NavClean" Style="{StaticResource NavItem}" Tag="&#xE74D;" Content="Чистка диска"
+                                     IsChecked="True" GroupName="Nav" Checked="OnNav" />
+                        <RadioButton x:Name="NavTweaks" Style="{StaticResource NavItem}" Tag="&#xED1A;" Content="Телеметрия и реклама"
+                                     GroupName="Nav" Checked="OnNav" />
+                        <RadioButton x:Name="NavLog" Style="{StaticResource NavItem}" Tag="&#xE81C;" Content="Журнал и откат"
+                                     GroupName="Nav" Checked="OnNav" />
+                    </StackPanel>
+                </DockPanel>
+            </Grid>
+        </Border>
+
+        <!-- ======================================================== main -->
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="40" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- title bar buttons -->
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top">
+                <Button Style="{StaticResource ChromeButton}" Content="&#xE921;" Click="OnMinimize" WindowChrome.IsHitTestVisibleInChrome="True" />
+                <Button x:Name="MaxButton" Style="{StaticResource ChromeButton}" Content="&#xE922;" Click="OnMaximize" WindowChrome.IsHitTestVisibleInChrome="True" />
+                <Button Style="{StaticResource CloseButton}" Content="&#xE8BB;" Click="OnClose" WindowChrome.IsHitTestVisibleInChrome="True" />
+            </StackPanel>
+
+            <!-- ==================================================== page: disk cleanup -->
+            <Grid x:Name="PageClean" Grid.Row="1" Margin="40,4,40,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Grid>
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource H1}" Text="Чистка диска" />
+                        <TextBlock Style="{StaticResource Sub}" Margin="0,4,0,0" MaxWidth="560" HorizontalAlignment="Left"
+                                   Text="Временные файлы, кэши и остатки обновлений. Личные файлы, пароли и история браузера не трогаются." />
+                    </StackPanel>
+                    <StackPanel HorizontalAlignment="Right" VerticalAlignment="Bottom">
+                        <TextBlock Text="выбрано" Style="{StaticResource Sub}" HorizontalAlignment="Right" />
+                        <TextBlock x:Name="CleanTotalText" Text="—" FontFamily="{StaticResource MonoFont}" FontSize="26"
+                                   Foreground="{StaticResource Text}" HorizontalAlignment="Right" />
+                    </StackPanel>
+                </Grid>
+
+                <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,18,0,12">
+                    <Button Style="{StaticResource GhostButton}" Content="Рекомендуемое" Click="OnCleanRecommended" />
+                    <Button Style="{StaticResource GhostButton}" Content="Снять всё" Click="OnCleanNone" />
+                    <Button x:Name="RescanButton" Style="{StaticResource GhostButton}" Content="Пересканировать" Click="OnRescan" />
+                </StackPanel>
+
+                <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" Padding="0,0,10,0">
+                    <ItemsControl x:Name="CleanList">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <CheckBox Style="{StaticResource CardCheck}" IsChecked="{Binding IsChecked, Mode=TwoWay}" Click="OnRowToggled" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+
+                <Grid Grid.Row="3" Margin="0,14,0,18">
+                    <TextBlock Style="{StaticResource Sub}" VerticalAlignment="Center" MaxWidth="520" HorizontalAlignment="Left"
+                               Text="Занятые программами файлы просто пропускаются — ничего не сломается." />
+                    <Button x:Name="CleanButton" Style="{StaticResource PrimaryButton}" Content="Очистить" HorizontalAlignment="Right" Click="OnClean" />
+                </Grid>
+            </Grid>
+
+            <!-- ==================================================== page: telemetry & ads -->
+            <Grid x:Name="PageTweaks" Grid.Row="1" Margin="40,4,40,0" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <StackPanel>
+                    <TextBlock Style="{StaticResource H1}" Text="Телеметрия и реклама" />
+                    <TextBlock Style="{StaticResource Sub}" Margin="0,4,0,0" MaxWidth="620" HorizontalAlignment="Left"
+                               Text="Настройки остаются после перезагрузки. Перед изменением исходные значения сохраняются, так что всё можно откатить. Защитник, брандмауэр, SmartScreen и обновления не трогаются." />
+                </StackPanel>
+
+                <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,18,0,12">
+                    <Button Style="{StaticResource GhostButton}" Content="Рекомендуемое" Click="OnTweaksRecommended" />
+                    <Button Style="{StaticResource GhostButton}" Content="Снять всё" Click="OnTweaksNone" />
+                </StackPanel>
+
+                <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" Padding="0,0,10,0">
+                    <ItemsControl x:Name="TweakList">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <CheckBox Style="{StaticResource CardCheck}" IsChecked="{Binding IsChecked, Mode=TwoWay}" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+
+                <Grid Grid.Row="3" Margin="0,14,0,18">
+                    <CheckBox x:Name="RestorePointCheck" Style="{StaticResource StitchCheck}" IsChecked="True" VerticalAlignment="Center"
+                              Content="Сначала создать точку восстановления Windows" />
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button x:Name="RevertButton" Style="{StaticResource GhostButton}" Content="Откатить выбранное" Margin="0,0,12,0" Click="OnRevertSelected" />
+                        <Button x:Name="ApplyButton" Style="{StaticResource PrimaryButton}" Content="Применить" Click="OnApply" />
+                    </StackPanel>
+                </Grid>
+            </Grid>
+
+            <!-- ==================================================== page: log & rollback -->
+            <Grid x:Name="PageLog" Grid.Row="1" Margin="40,4,40,0" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <StackPanel>
+                    <TextBlock Style="{StaticResource H1}" Text="Журнал и откат" />
+                    <TextBlock x:Name="BackupInfoText" Style="{StaticResource Sub}" Margin="0,4,0,0" />
+                </StackPanel>
+
+                <Border Grid.Row="1" Margin="0,18,0,0" Background="#100C12" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="3">
+                    <TextBox x:Name="LogBox" IsReadOnly="True" Background="Transparent" BorderThickness="0" Padding="14,12"
+                             Foreground="#C9BCC4" FontFamily="{StaticResource MonoFont}" FontSize="12.5" TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto" SelectionBrush="{StaticResource PinkDim}" CaretBrush="{StaticResource Pink}" />
+                </Border>
+
+                <Grid Grid.Row="2" Margin="0,14,0,18">
+                    <StackPanel Orientation="Horizontal">
+                        <Button Style="{StaticResource GhostButton}" Content="Папка с бэкапом" Click="OnOpenBackupFolder" />
+                        <Button Style="{StaticResource GhostButton}" Content="Копировать журнал" Click="OnCopyLog" />
+                    </StackPanel>
+                    <Button x:Name="RevertAllButton" Style="{StaticResource PrimaryButton}" Content="Откатить всё" HorizontalAlignment="Right" Click="OnRevertAll" />
+                </Grid>
+            </Grid>
+
+            <!-- ==================================================== status line -->
+            <Border Grid.Row="2" Background="{StaticResource Paper}" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0">
+                <Grid>
+                    <ProgressBar x:Name="Progress" Style="{StaticResource ThreadProgress}" VerticalAlignment="Top" IsIndeterminate="False" Visibility="Hidden" />
+                    <TextBlock x:Name="StatusText" Margin="40,9,40,10" FontSize="12" Foreground="{StaticResource Muted}"
+                               TextTrimming="CharacterEllipsis" Text="Готово." />
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- film grain (generated in code) -->
+        <Rectangle x:Name="Grain" Grid.ColumnSpan="2" IsHitTestVisible="False" Opacity="0.045" />
+    </Grid>
+</Window>
