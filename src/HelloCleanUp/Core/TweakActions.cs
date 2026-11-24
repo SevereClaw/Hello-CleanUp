@@ -10,6 +10,9 @@ namespace HelloCleanUp.Core
     {
         /// <summary>True when the system already matches the tweaked state (or the thing does not exist here).</summary>
         bool IsApplied();
+
+        /// <summary>What Apply would change, as one human-readable line; null when nothing would change.</summary>
+        string Describe();
         void Apply(BackupStore backup, Action<string> log);
         void Revert(BackupStore backup, Action<string> log);
     }
@@ -93,6 +96,24 @@ namespace HelloCleanUp.Core
             }
             return string.Equals(Convert.ToString(v, CultureInfo.InvariantCulture),
                                  Convert.ToString(_value, CultureInfo.InvariantCulture), StringComparison.Ordinal);
+        }
+
+        public string Describe()
+        {
+            if (IsApplied()) return null;
+            RegistryValueKind kind;
+            var current = Read(out kind);
+            return "реестр " + HiveName + "\\" + _path + " → " + _name + ": " + Show(current) + " → " + Show(_value);
+        }
+
+        private static string Show(object v)
+        {
+            if (v == null) return "(нет)";
+            var multi = v as string[];
+            if (multi != null) return "[" + string.Join(", ", multi) + "]";
+            var bin = v as byte[];
+            if (bin != null) return "(двоичное, " + bin.Length + " Б)";
+            return Convert.ToString(v, CultureInfo.InvariantCulture);
         }
 
         public void Apply(BackupStore backup, Action<string> log)
@@ -230,6 +251,28 @@ namespace HelloCleanUp.Core
 
         public ServiceAction(string name) { _name = name; }
 
+        public override string ToString() { return "служба " + _name; }
+
+        private static string StartName(int start)
+        {
+            switch (start)
+            {
+                case 0: return "загрузка";
+                case 1: return "система";
+                case 2: return "автоматически";
+                case 3: return "вручную";
+                case 4: return "отключена";
+                default: return start.ToString(CultureInfo.InvariantCulture);
+            }
+        }
+
+        public string Describe()
+        {
+            var s = ReadStart();
+            if (s == null || s.Value == 4) return null;
+            return "служба " + _name + ": " + StartName(s.Value) + " → отключена";
+        }
+
         private string Key { get { return "svc|" + _name; } }
 
         private int? ReadStart()
@@ -296,6 +339,14 @@ namespace HelloCleanUp.Core
         private readonly string _task;
 
         public TaskAction(string taskPath) { _task = taskPath; }
+
+        public override string ToString() { return "задача " + _task; }
+
+        public string Describe()
+        {
+            var e = IsEnabled();
+            return e == true ? "задача " + _task + ": включена → отключена" : null;
+        }
 
         private string Key { get { return "task|" + _task; } }
 

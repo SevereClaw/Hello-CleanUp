@@ -335,6 +335,29 @@ namespace HelloCleanUp
             }
             bool restorePoint = RestorePointCheck.IsChecked == true;
 
+            // First show exactly what will change, and apply only after a yes.
+            string preview = null;
+            int changes = 0;
+            await RunBusy("Смотрю, что изменится…", () =>
+            {
+                preview = Preview.ForTweaks(selected.Select(r => r.Tweak), out changes);
+            });
+            if (preview == null) return; // busy or failed — RunBusy already said why
+            if (changes == 0)
+            {
+                StatusText.Text = "Всё выбранное уже применено — менять нечего.";
+                return;
+            }
+            var dialog = new PreviewDialog(this, "Что изменится",
+                "Изменений: " + changes + ". Перед каждым из них исходное значение сохранится в бэкап, так что всё можно будет откатить" +
+                (restorePoint ? ". Сначала будет создана точка восстановления Windows." : "."),
+                preview, "Применить");
+            if (dialog.ShowDialog() != true)
+            {
+                StatusText.Text = "Отменено, ничего не изменено.";
+                return;
+            }
+
             await RunBusy("Применяю…", () =>
             {
                 Log("— Применение настроек —");
