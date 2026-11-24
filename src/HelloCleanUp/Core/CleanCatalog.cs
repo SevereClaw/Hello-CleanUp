@@ -64,20 +64,23 @@ namespace HelloCleanUp.Core
                     true, () => new[] { Path.Combine(WinDir, "Temp") }),
 
                 new CleanTarget("update-cache", "Загруженные обновления Windows",
-                    "Установочные файлы уже установленных обновлений. Служба обновлений будет на секунду остановлена и снова запущена.",
+                    "Установочные файлы уже установленных обновлений. Служба обновлений будет на секунду остановлена и снова запущена, если работала.",
                     true,
                     () => FileWiper.SizeOfDir(Path.Combine(WinDir, @"SoftwareDistribution\Download")),
                     log =>
                     {
                         var dir = Path.Combine(WinDir, @"SoftwareDistribution\Download");
-                        Shell.Run(Shell.System32("net.exe"), "stop wuauserv /y", 60000);
-                        Shell.Run(Shell.System32("net.exe"), "stop bits /y", 60000);
+                        // Only restart what was running before: a service the user stopped stays stopped.
+                        bool wuWasRunning = Shell.IsServiceRunning("wuauserv");
+                        bool bitsWasRunning = Shell.IsServiceRunning("bits");
+                        if (wuWasRunning) Shell.Run(Shell.System32("net.exe"), "stop wuauserv /y", 60000);
+                        if (bitsWasRunning) Shell.Run(Shell.System32("net.exe"), "stop bits /y", 60000);
                         long freed;
                         try { freed = FileWiper.WipeDir(dir); }
                         finally
                         {
-                            Shell.Run(Shell.System32("net.exe"), "start bits", 60000);
-                            Shell.Run(Shell.System32("net.exe"), "start wuauserv", 60000);
+                            if (bitsWasRunning) Shell.Run(Shell.System32("net.exe"), "start bits", 60000);
+                            if (wuWasRunning) Shell.Run(Shell.System32("net.exe"), "start wuauserv", 60000);
                         }
                         log("  " + dir + " — " + FileWiper.Pretty(freed));
                         return freed;

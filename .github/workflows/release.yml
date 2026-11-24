@@ -6,12 +6,15 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Read-only by default; only the release job below can write, and only on pushes to main.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
     runs-on: windows-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -19,39 +22,65 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      - name: Build
-        run: dotnet build src/HelloCleanUp/HelloCleanUp.csproj -c Release
-
       - name: Read version
         id: ver
         shell: pwsh
         run: |
           [xml]$proj = Get-Content src/HelloCleanUp/HelloCleanUp.csproj
           $v = ($proj.Project.PropertyGroup | Where-Object { $_.Version } | Select-Object -First 1).Version
+          [xml]$manifest = Get-Content src/HelloCleanUp/app.manifest
+          $m = $manifest.assembly.assemblyIdentity.version
+          if ($m -ne "$v.0") {
+            Write-Error "Версия в app.manifest ($m) не совпадает с HelloCleanUp.csproj ($v.0). Поправь assemblyIdentity."
+            exit 1
+          }
           "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Build
+        run: dotnet build src/HelloCleanUp/HelloCleanUp.csproj -c Release
 
       - name: Package
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force out | Out-Null
           Copy-Item src/HelloCleanUp/bin/Release/net48/HelloCleanUp.exe out/HelloCleanUp.exe
+          $hash = (Get-FileHash out/HelloCleanUp.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  HelloCleanUp.exe" | Set-Content -Encoding ascii out/HelloCleanUp.exe.sha256
           Get-Item out/HelloCleanUp.exe | Format-List Name, Length
+          Get-Content out/HelloCleanUp.exe.sha256
 
       - uses: actions/upload-artifact@v4
         with:
           name: HelloCleanUp-${{ steps.ver.outputs.version }}
-          path: out/HelloCleanUp.exe
+          path: |
+            out/HelloCleanUp.exe
+            out/HelloCleanUp.exe.sha256
+
+  release:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: HelloCleanUp-${{ needs.build.outputs.version }}
+          path: out
 
       - name: Publish release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v${{ needs.build.outputs.version }}
         run: |
-          $tag = "v${{ steps.ver.outputs.version }}"
-          gh release view $tag 2>$null
-          if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag out/HelloCleanUp.exe --clobber
-          } else {
-            gh release create $tag out/HelloCleanUp.exe --title "Hello, CleanUp. $tag" --notes-file RELEASE_NOTES.md
-          }
+          # A published release is never overwritten: a new exe needs a new <Version> in HelloCleanUp.csproj.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::notice::Релиз $TAG уже есть — не трогаю его. Чтобы выпустить новую сборку, подними <Version> в HelloCleanUp.csproj и app.manifest."
+            exit 0
+          fi
+          gh release create "$TAG" out/HelloCleanUp.exe out/HelloCleanUp.exe.sha256 \
+            --target "$GITHUB_SHA" \
+            --title "Hello, CleanUp. $TAG" \
+            --notes-file RELEASE_NOTES.md

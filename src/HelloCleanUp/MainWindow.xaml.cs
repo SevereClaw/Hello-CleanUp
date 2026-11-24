@@ -40,12 +40,91 @@ namespace HelloCleanUp
             {
                 Log("Hello, " + Environment.UserName + ". Windows " + Environment.OSVersion.Version);
                 UpdateBackupInfo();
+                if (_backup.LoadProblem != null)
+                {
+                    Log("Бэкап: " + _backup.LoadProblem);
+                    MessageBox.Show(this, _backup.LoadProblem, "Hello, CleanUp.", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+                WarnIfOtherAccount();
+                CheckForUpdateAsync();
                 await RunBusy("Смотрю, что можно убрать…", () =>
                 {
                     ScanAll();
                     RefreshTweakStates();
                 });
             };
+        }
+
+        // ================================================================== account & updates
+
+        private void WarnIfOtherAccount()
+        {
+            var signedIn = UserContext.OtherSessionUser();
+            if (signedIn == null) return;
+            var text = "Программа запущена от имени " + UserContext.ProcessUser + ", а в Windows вошёл " + signedIn + ".\n\n" +
+                       "Настройки Пуска, рекламы и приватности (разделы HKCU) применятся к " + Environment.UserName +
+                       ", а не к " + signedIn + ". Чтобы они касались твоей учётной записи, запусти программу из неё.";
+            Log("Внимание: " + text.Replace("\n\n", " "));
+            MessageBox.Show(this, text, "Hello, CleanUp.", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+
+        private UpdateCheck.Release _update;
+
+        private async void CheckForUpdateAsync()
+        {
+            var current = UpdateCheck.Normalize(Assembly.GetExecutingAssembly().GetName().Version);
+            string error = null;
+            var release = await Task.Run(() => UpdateCheck.Newer(current, out error));
+            if (release == null) return; // up to date, or offline — not worth a word
+            _update = release;
+            UpdateRun.Text = "Обновить до " + release.Version + " →";
+            UpdateText.Visibility = Visibility.Visible;
+            Log("Вышла новая версия " + release.Version + ": " + UpdateCheck.ReleasesPage);
+
+            // Don't interrupt the first scan or anything else that is running.
+            while (_busy) await Task.Delay(300);
+            if (_update == null) return;
+            var answer = MessageBox.Show(this,
+                "Вышла новая версия Hello, CleanUp. — " + release.Version + " (у тебя " + current + ").\n\n" +
+                "Обновить сейчас? Программа скачает её с GitHub, проверит контрольную сумму SHA-256 и перезапустится. " +
+                "Бэкап и возможность отката сохранятся.\n\nЧто нового: " + UpdateCheck.ReleasesPage,
+                "Hello, CleanUp.", MessageBoxButton.YesNo, MessageBoxImage.Information);
+            if (answer == MessageBoxResult.Yes) await InstallUpdate();
+        }
+
+        private async void OnOpenReleases(object sender, RoutedEventArgs e)
+        {
+            if (_update != null) await InstallUpdate();
+        }
+
+        private async Task InstallUpdate()
+        {
+            var release = _update;
+            if (release == null || _busy) return;
+            bool installed = false;
+            await RunBusy("Скачиваю версию " + release.Version + "…", () =>
+            {
+                Updater.Install(release, Log);
+                installed = true;
+            });
+            if (!installed)
+            {
+                MessageBox.Show(this,
+                    "Не удалось обновиться — подробности в журнале. Текущая версия не тронута.\n\nМожно скачать вручную: " + UpdateCheck.ReleasesPage,
+                    "Hello, CleanUp.", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            _update = null;
+            try
+            {
+                Updater.Restart();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "Новая версия установлена, но не запустилась (" + ex.Message + "). Запусти программу заново.",
+                    "Hello, CleanUp.", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            Application.Current.Shutdown();
         }
 
         // ================================================================== window chrome
@@ -299,6 +378,29 @@ namespace HelloCleanUp
             }
             bool restorePoint = RestorePointCheck.IsChecked == true;
 
+            // First show exactly what will change, and apply only after a yes.
+            string preview = null;
+            int changes = 0;
+            await RunBusy("Смотрю, что изменится…", () =>
+            {
+                preview = Preview.ForTweaks(selected.Select(r => r.Tweak), out changes);
+            });
+            if (preview == null) return; // busy or failed — RunBusy already said why
+            if (changes == 0)
+            {
+                StatusText.Text = "Всё выбранное уже применено — менять нечего.";
+                return;
+            }
+            var dialog = new PreviewDialog(this, "Что изменится",
+                "Изменений: " + changes + ". Перед каждым из них исходное значение сохранится в бэкап, так что всё можно будет откатить" +
+                (restorePoint ? ". Сначала будет создана точка восстановления Windows." : "."),
+                preview, "Применить");
+            if (dialog.ShowDialog() != true)
+            {
+                StatusText.Text = "Отменено, ничего не изменено.";
+                return;
+            }
+
             await RunBusy("Применяю…", () =>
             {
                 Log("— Применение настроек —");
@@ -362,9 +464,17 @@ namespace HelloCleanUp
             await RunBusy("Откатываю всё…", () =>
             {
                 Log("— Откат всего —");
-                foreach (var row in _tweakRows) row.Tweak.Revert(_backup, Log);
+                var left = Rollback.RevertAll(_backup, Log);
                 RefreshTweakStates();
-                Status("Всё возвращено как было.");
+                if (left == 0)
+                {
+                    Status("Всё возвращено как было.");
+                }
+                else
+                {
+                    Log("Не откатилось записей: " + left + ". Они остались в бэкапе — подробности выше.");
+                    Status("Откатил не всё: осталось записей — " + left + ". Подробности в журнале.");
+                }
             });
         }
 
