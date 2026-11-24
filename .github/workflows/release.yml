@@ -68,6 +68,20 @@ jobs:
           if (Select-String -Path $list -Pattern 'PowerShell не вернул' -Quiet) { throw 'список приложений не прочитался' }
           Invoke-Cli @('/tweaks:all', '/apps:all', '/deprovision', '/clean:all', '/dry-run') 'dry-run' | Out-Null
 
+          # Real remove → restore cycle on this throwaway runner, with an app Windows images usually carry.
+          $installed = '\*\+ feedback-hub'
+          if (Select-String -Path $list -Pattern $installed -Quiet) {
+            Invoke-Cli @('/apps:feedback-hub') 'remove' | Out-Null
+            $after = Invoke-Cli @('/list') 'list-after-remove'
+            if (Select-String -Path $after -Pattern $installed -Quiet) { throw 'Центр отзывов не удалился' }
+            Invoke-Cli @('/revert:feedback-hub') 'restore' | Out-Null
+            $back = Invoke-Cli @('/list') 'list-after-restore'
+            if (-not (Select-String -Path $back -Pattern $installed -Quiet)) { throw 'Центр отзывов не вернулся' }
+            Write-Host 'Удаление и возврат приложения работают.'
+          } else {
+            Write-Host '::notice::На раннере нет Центра отзывов — проверка удаления и возврата пропущена'
+          }
+
       - uses: actions/upload-artifact@v4
         with:
           name: HelloCleanUp-${{ steps.ver.outputs.version }}
