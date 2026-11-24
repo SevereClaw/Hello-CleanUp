@@ -50,7 +50,17 @@ namespace HelloCleanUp.Core
         }
 
         private string HiveName { get { return _hive == RegistryHive.LocalMachine ? "HKLM" : "HKCU"; } }
-        private string Key { get { return "reg|" + HiveName + "\\" + _path + "|" + _name; } }
+
+        /// <summary>Per-user values carry the SID, so two accounts never share (or overwrite) one backup entry.</summary>
+        private string Key
+        {
+            get
+            {
+                return _hive == RegistryHive.LocalMachine
+                    ? "reg|HKLM\\" + _path + "|" + _name
+                    : "reg|HKU\\" + UserContext.Sid + "\\" + _path + "|" + _name;
+            }
+        }
         public override string ToString() { return HiveName + "\\" + _path + " → " + _name + " = " + _value; }
 
         private RegistryKey OpenBase()
@@ -101,22 +111,73 @@ namespace HelloCleanUp.Core
 
         public void Revert(BackupStore backup, Action<string> log)
         {
-            var saved = backup.Get(Key);
-            if (saved == null)
+            // Nothing remembered: the value was set by someone else, leave it alone.
+            if (backup.Has(Key)) RevertKey(backup, Key, log);
+        }
+
+        /// <summary>
+        /// Restores one "reg|..." backup entry on its own, without needing the tweak that wrote it —
+        /// so values from tweaks that a later version renamed or dropped can still be reverted.
+        /// Returns false (and keeps the entry) when it can't be done from this account.
+        /// </summary>
+        public static bool RevertKey(BackupStore backup, string key, Action<string> log)
+        {
+            var saved = backup.Get(key);
+            if (saved == null) return true;
+
+            var body = key.Substring("reg|".Length);
+            var bar = body.LastIndexOf('|');
+            var fullPath = body.Substring(0, bar);
+            var name = body.Substring(bar + 1);
+
+            RegistryKey root;
+            string path;
+            string display;
+            if (fullPath.StartsWith("HKLM\\", StringComparison.OrdinalIgnoreCase))
             {
-                // Nothing remembered: the value was set by someone else, leave it alone.
-                return;
+                root = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
+                path = fullPath.Substring(5);
+                display = fullPath;
+            }
+            else if (fullPath.StartsWith("HKU\\", StringComparison.OrdinalIgnoreCase))
+            {
+                var rest = fullPath.Substring(4);
+                var slash = rest.IndexOf('\\');
+                var sid = rest.Substring(0, slash);
+                path = rest.Substring(slash + 1);
+                display = "HKCU\\" + path;
+                if (string.Equals(sid, UserContext.Sid, StringComparison.OrdinalIgnoreCase))
+                {
+                    root = RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, RegistryView.Registry64);
+                }
+                else
+                {
+                    // Another account's profile: only reachable while that user is signed in.
+                    using (var users = RegistryKey.OpenBaseKey(RegistryHive.Users, RegistryView.Registry64))
+                        root = users.OpenSubKey(sid, true);
+                    if (root == null)
+                    {
+                        log("  реестр: " + display + " → " + name + " — значение другой учётной записи (" + sid + "), запусти программу под ней");
+                        return false;
+                    }
+                    display = sid + "\\" + path;
+                }
+            }
+            else
+            {
+                log("  реестр: непонятная запись бэкапа «" + key + "», пропуск");
+                return false;
             }
 
-            using (var b = OpenBase())
+            using (root)
             {
                 if (saved == "absent")
                 {
-                    using (var k = b.OpenSubKey(_path, true))
+                    using (var k = root.OpenSubKey(path, true))
                     {
-                        if (k != null) k.DeleteValue(_name, false);
+                        if (k != null) k.DeleteValue(name, false);
                     }
-                    log("  реестр: удалено " + HiveName + "\\" + _path + " → " + _name);
+                    log("  реестр: удалено " + display + " → " + name);
                 }
                 else
                 {
@@ -132,14 +193,15 @@ namespace HelloCleanUp.Core
                         case RegistryValueKind.Binary: value = Convert.FromBase64String(raw); break;
                         default: value = raw; break;
                     }
-                    using (var k = b.CreateSubKey(_path, true))
+                    using (var k = root.CreateSubKey(path, true))
                     {
-                        k.SetValue(_name, value, kind);
+                        k.SetValue(name, value, kind);
                     }
-                    log("  реестр: восстановлено " + HiveName + "\\" + _path + " → " + _name + " = " + raw);
+                    log("  реестр: восстановлено " + display + " → " + name + " = " + raw);
                 }
             }
-            backup.Forget(Key);
+            backup.Forget(key);
+            return true;
         }
 
         private static string Serialize(object v, RegistryValueKind kind)
@@ -208,13 +270,21 @@ namespace HelloCleanUp.Core
 
         public void Revert(BackupStore backup, Action<string> log)
         {
-            var saved = backup.Get(Key);
-            if (saved == null) return;
+            RevertKey(backup, Key, log);
+        }
+
+        /// <summary>Restores one "svc|name" backup entry on its own.</summary>
+        public static bool RevertKey(BackupStore backup, string key, Action<string> log)
+        {
+            var saved = backup.Get(key);
+            if (saved == null) return true;
+            var name = key.Substring("svc|".Length);
             var start = int.Parse(saved, CultureInfo.InvariantCulture);
-            WriteStart(start);
-            if (start == 2) Shell.Run(Shell.System32("sc.exe"), "start " + _name, 30000);
-            log("  служба " + _name + ": тип запуска восстановлен (" + start + ")");
-            backup.Forget(Key);
+            new ServiceAction(name).WriteStart(start);
+            if (start == 2) Shell.Run(Shell.System32("sc.exe"), "start " + name, 30000);
+            log("  служба " + name + ": тип запуска восстановлен (" + start + ")");
+            backup.Forget(key);
+            return true;
         }
     }
 
@@ -268,14 +338,27 @@ namespace HelloCleanUp.Core
 
         public void Revert(BackupStore backup, Action<string> log)
         {
-            var saved = backup.Get(Key);
-            if (saved == null) return;
+            RevertKey(backup, Key, log);
+        }
+
+        /// <summary>Restores one "task|path" backup entry on its own.</summary>
+        public static bool RevertKey(BackupStore backup, string key, Action<string> log)
+        {
+            var saved = backup.Get(key);
+            if (saved == null) return true;
+            var task = key.Substring("task|".Length);
             if (saved == "1")
             {
-                Shell.Run(Shell.System32("schtasks.exe"), "/Change /TN \"" + _task + "\" /Enable", 30000);
-                log("  задача " + _task + ": включена обратно");
+                var code = Shell.Run(Shell.System32("schtasks.exe"), "/Change /TN \"" + task + "\" /Enable", 30000);
+                if (code != 0 && new TaskAction(task).IsEnabled() != null)
+                {
+                    log("  задача " + task + ": не удалось включить (код " + code + "), запись оставлена в бэкапе");
+                    return false;
+                }
+                log("  задача " + task + ": включена обратно");
             }
-            backup.Forget(Key);
+            backup.Forget(key);
+            return true;
         }
     }
 }

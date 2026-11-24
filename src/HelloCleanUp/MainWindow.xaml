@@ -58,6 +58,13 @@
                     <TextBlock DockPanel.Dock="Bottom" x:Name="VersionText" Margin="26,0,0,0" FontSize="11"
                                Foreground="#5E525B" FontFamily="{StaticResource MonoFont}" />
 
+                    <TextBlock DockPanel.Dock="Bottom" x:Name="UpdateText" Margin="26,0,20,6" FontSize="12"
+                               Visibility="Collapsed" TextWrapping="Wrap">
+                        <Hyperlink Click="OnOpenReleases" Foreground="{StaticResource Pink}" TextDecorations="{x:Null}">
+                            <Run x:Name="UpdateRun" Text="Есть новая версия →" />
+                        </Hyperlink>
+                    </TextBlock>
+
                     <StackPanel>
                         <RadioButton x:Name="NavClean" Style="{StaticResource NavItem}" Tag="&#xE74D;" Content="Чистка диска"
                                      IsChecked="True" GroupName="Nav" Checked="OnNav" />

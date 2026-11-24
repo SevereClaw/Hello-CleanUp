@@ -40,12 +40,48 @@ namespace HelloCleanUp
             {
                 Log("Hello, " + Environment.UserName + ". Windows " + Environment.OSVersion.Version);
                 UpdateBackupInfo();
+                if (_backup.LoadProblem != null)
+                {
+                    Log("Бэкап: " + _backup.LoadProblem);
+                    MessageBox.Show(this, _backup.LoadProblem, "Hello, CleanUp.", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+                WarnIfOtherAccount();
+                CheckForUpdateAsync();
                 await RunBusy("Смотрю, что можно убрать…", () =>
                 {
                     ScanAll();
                     RefreshTweakStates();
                 });
             };
+        }
+
+        // ================================================================== account & updates
+
+        private void WarnIfOtherAccount()
+        {
+            var signedIn = UserContext.OtherSessionUser();
+            if (signedIn == null) return;
+            var text = "Программа запущена от имени " + UserContext.ProcessUser + ", а в Windows вошёл " + signedIn + ".\n\n" +
+                       "Настройки Пуска, рекламы и приватности (разделы HKCU) применятся к " + Environment.UserName +
+                       ", а не к " + signedIn + ". Чтобы они касались твоей учётной записи, запусти программу из неё.";
+            Log("Внимание: " + text.Replace("\n\n", " "));
+            MessageBox.Show(this, text, "Hello, CleanUp.", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+
+        private async void CheckForUpdateAsync()
+        {
+            var current = Assembly.GetExecutingAssembly().GetName().Version;
+            var newer = await Task.Run(() => UpdateCheck.NewerVersion(current));
+            if (newer == null) return;
+            UpdateRun.Text = "Есть версия " + newer + " →";
+            UpdateText.Visibility = Visibility.Visible;
+            Log("Вышла новая версия " + newer + ": " + UpdateCheck.ReleasesPage);
+        }
+
+        private void OnOpenReleases(object sender, RoutedEventArgs e)
+        {
+            try { Process.Start(new ProcessStartInfo(UpdateCheck.ReleasesPage) { UseShellExecute = true }); }
+            catch { StatusText.Text = UpdateCheck.ReleasesPage; }
         }
 
         // ================================================================== window chrome
@@ -362,9 +398,17 @@ namespace HelloCleanUp
             await RunBusy("Откатываю всё…", () =>
             {
                 Log("— Откат всего —");
-                foreach (var row in _tweakRows) row.Tweak.Revert(_backup, Log);
+                var left = Rollback.RevertAll(_backup, Log);
                 RefreshTweakStates();
-                Status("Всё возвращено как было.");
+                if (left == 0)
+                {
+                    Status("Всё возвращено как было.");
+                }
+                else
+                {
+                    Log("Не откатилось записей: " + left + ". Они остались в бэкапе — подробности выше.");
+                    Status("Откатил не всё: осталось записей — " + left + ". Подробности в журнале.");
+                }
             });
         }
 

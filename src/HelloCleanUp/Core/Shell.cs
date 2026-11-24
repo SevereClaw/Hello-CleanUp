@@ -52,6 +52,24 @@ namespace HelloCleanUp.Core
             return Run(file, args, out _, timeoutMs);
         }
 
+        /// <summary>True if the service exists and is running (or starting).</summary>
+        public static bool IsServiceRunning(string name)
+        {
+            try
+            {
+                using (var sc = new System.ServiceProcess.ServiceController(name))
+                {
+                    var s = sc.Status;
+                    return s == System.ServiceProcess.ServiceControllerStatus.Running
+                        || s == System.ServiceProcess.ServiceControllerStatus.StartPending;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         public static string System32(string exe)
         {
             return System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), exe);
