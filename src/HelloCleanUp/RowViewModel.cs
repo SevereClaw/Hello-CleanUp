@@ -3,13 +3,17 @@ using HelloCleanUp.Core;
 
 namespace HelloCleanUp
 {
-    /// <summary>One card in a list: either a tweak or a cleanup target.</summary>
+    /// <summary>One card in a list: a tweak, a cleanup target or a preinstalled app.</summary>
     public sealed class RowViewModel : INotifyPropertyChanged
     {
         public event PropertyChangedEventHandler PropertyChanged;
 
         public Tweak Tweak { get; private set; }
         public CleanTarget Target { get; private set; }
+        public AppEntry App { get; private set; }
+
+        /// <summary>For apps: installed for the current account right now.</summary>
+        public bool AppInstalled { get; set; }
 
         public string Title { get; private set; }
         public string Description { get; private set; }
@@ -50,6 +54,12 @@ namespace HelloCleanUp
             Target = t; Title = t.Title; Description = t.Description; Recommended = t.Recommended;
             IsChecked = t.Recommended;
             Size = -1;
+        }
+
+        public RowViewModel(AppEntry app, string description, bool isChecked)
+        {
+            App = app; Title = app.Title; Description = description; Recommended = app.Recommended;
+            IsChecked = isChecked;
         }
 
         public void SetStatus(string text, string kind)

@@ -16,7 +16,7 @@
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
 
     <!-- Keep in step with assemblyIdentity in app.manifest (CI checks it). -->
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <Product>Hello, CleanUp.</Product>
     <Company>SevereClaw</Company>
     <Description>Чистка Windows и отключение телеметрии и рекламы</Description>

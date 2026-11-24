@@ -19,8 +19,8 @@ namespace HelloCleanUp
 
         private sealed class Options
         {
-            public string Tweaks, Clean, Revert, LogPath;
-            public bool DryRun, List, Help, NoRestorePoint, Update;
+            public string Tweaks, Clean, Revert, Apps, LogPath;
+            public bool DryRun, List, Help, NoRestorePoint, Update, Deprovision;
         }
 
         private static StreamWriter _file;
@@ -62,15 +62,21 @@ namespace HelloCleanUp
 
             var tweaks = TweakCatalog.Telemetry();
             var targets = CleanCatalog.All();
-            if (o.List) { PrintList(tweaks, targets); return ExitOk; }
+            var appCatalog = AppCatalog.All();
+            if (o.List)
+            {
+                if (o.LogPath != null) OpenLog(o.LogPath);
+                PrintList(tweaks, targets, appCatalog);
+                return ExitOk;
+            }
             if (o.Update)
             {
-                if (o.Tweaks != null || o.Clean != null || o.Revert != null || o.DryRun)
+                if (o.Tweaks != null || o.Clean != null || o.Revert != null || o.Apps != null || o.DryRun)
                     return BadArgs("/update указывается отдельно, без других действий");
                 return SelfUpdate(o);
             }
 
-            if (o.Tweaks == null && o.Clean == null && o.Revert == null)
+            if (o.Tweaks == null && o.Clean == null && o.Revert == null && o.Apps == null)
             {
                 Out("Не указано, что делать.");
                 Out("");
@@ -80,20 +86,41 @@ namespace HelloCleanUp
 
             List<Tweak> applyList = null, revertList = null;
             List<CleanTarget> cleanList = null;
+            List<AppEntry> appList = null, revertApps = null;
             bool revertAll = false;
 
             if (o.Tweaks != null && !TrySelect(o.Tweaks, tweaks, t => t.Id, t => t.Recommended, out applyList, out error))
                 return BadArgs("/tweaks: " + error);
             if (o.Clean != null && !TrySelect(o.Clean, targets, t => t.Id, t => t.Recommended, out cleanList, out error))
                 return BadArgs("/clean: " + error);
+            if (o.Apps != null && !TrySelect(o.Apps, appCatalog, a => a.Id, a => a.Recommended, out appList, out error))
+                return BadArgs("/apps: " + error);
             if (o.Revert != null)
             {
-                if (string.Equals(o.Revert.Trim(), "all", StringComparison.OrdinalIgnoreCase)) revertAll = true;
-                else if (!TrySelect(o.Revert, tweaks, t => t.Id, t => t.Recommended, out revertList, out error))
-                    return BadArgs("/revert: " + error);
+                var spec = o.Revert.Trim();
+                if (string.Equals(spec, "all", StringComparison.OrdinalIgnoreCase)) revertAll = true;
+                else if (string.Equals(spec, "recommended", StringComparison.OrdinalIgnoreCase)) revertList = tweaks.Where(t => t.Recommended).ToList();
+                else
+                {
+                    // Ids of tweaks and apps can be mixed: /revert:start-ads,candy-crush
+                    revertList = new List<Tweak>();
+                    revertApps = new List<AppEntry>();
+                    foreach (var part in spec.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        var id = part.Trim();
+                        var t = tweaks.FirstOrDefault(x => string.Equals(x.Id, id, StringComparison.OrdinalIgnoreCase));
+                        var a = appCatalog.FirstOrDefault(x => string.Equals(x.Id, id, StringComparison.OrdinalIgnoreCase));
+                        if (t == null && a == null) return BadArgs("/revert: неизвестный id «" + id + "» (список: HelloCleanUp.exe /list)");
+                        if (t != null && !revertList.Contains(t)) revertList.Add(t);
+                        if (a != null && !revertApps.Contains(a)) revertApps.Add(a);
+                    }
+                    if (revertList.Count == 0) revertList = null;
+                    if (revertApps.Count == 0) revertApps = null;
+                    if (revertList == null && revertApps == null) return BadArgs("/revert: пустой список");
+                }
             }
-            if (applyList != null && (revertAll || revertList != null))
-                return BadArgs("/tweaks и /revert нельзя указывать вместе");
+            if ((applyList != null || appList != null) && (revertAll || revertList != null || revertApps != null))
+                return BadArgs("/tweaks и /apps нельзя указывать вместе с /revert");
 
             if (o.LogPath != null || !o.DryRun) OpenLog(o.LogPath);
 
@@ -140,6 +167,21 @@ namespace HelloCleanUp
                     else errors += t.Revert(backup, Out);
                 }
             }
+            if (revertApps != null)
+            {
+                Out("");
+                Out("— Возврат приложений —");
+                if (o.DryRun)
+                {
+                    foreach (var a in revertApps) Out("  " + a.Title + "  [" + a.Id + "]");
+                }
+                else
+                {
+                    var keys = AppxManager.KeysFor(backup, revertApps);
+                    if (keys.Count == 0) Out("  среди выбранных нет приложений, удалённых через Hello CleanUp");
+                    else errors += AppxManager.Restore(backup, keys, Out, null);
+                }
+            }
 
             // ---------------------------------------------------------- tweaks
             if (applyList != null)
@@ -169,6 +211,36 @@ namespace HelloCleanUp
                             foreach (var t in applyList) errors += t.Apply(backup, Out);
                             Out("Часть изменений заработает после перезапуска проводника или перезагрузки.");
                         }
+                    }
+                }
+            }
+
+            // ---------------------------------------------------------- preinstalled apps
+            if (appList != null)
+            {
+                Out("");
+                Out("— Встроенные приложения —");
+                var inv = AppxManager.Load();
+                if (inv.Error != null)
+                {
+                    Out("  " + inv.Error);
+                    if (inv.Packages.Count == 0) errors++;
+                }
+                int count;
+                var preview = AppxManager.Preview(appList, inv, o.Deprovision, out count);
+                if (count == 0)
+                {
+                    Out("  выбранных приложений на компьютере нет, удалять нечего");
+                }
+                else
+                {
+                    Out("Будет удалено (" + count + "):");
+                    foreach (var line in preview.Split('\n')) Out("  " + line.TrimEnd('\r'));
+                    if (o.Deprovision) Out("  (для новых пользователей это не откатывается — им приложения можно будет поставить только из Microsoft Store)");
+                    if (!o.DryRun)
+                    {
+                        Out("");
+                        errors += AppxManager.Remove(appList, inv, o.Deprovision, backup, Out);
                     }
                 }
             }
@@ -282,6 +354,10 @@ namespace HelloCleanUp
                         o.List = true; break;
                     case "update":
                         o.Update = true; break;
+                    case "apps":
+                        o.Apps = string.IsNullOrEmpty(value) ? "recommended" : value; break;
+                    case "deprovision":
+                        o.Deprovision = true; break;
                     case "quiet":
                     case "silent":
                         break; // the command line never shows windows anyway
@@ -330,7 +406,9 @@ namespace HelloCleanUp
             Out("");
             Out("  /tweaks[:recommended|all|id,id…]   применить твики (по умолчанию — рекомендуемые)");
             Out("  /clean[:recommended|all|id,id…]    почистить диск (по умолчанию — рекомендуемое)");
-            Out("  /revert[:all|id,id…]               откатить (по умолчанию — всё из бэкапа)");
+            Out("  /apps[:recommended|all|id,id…]     удалить встроенные приложения (по умолчанию — рекомендуемые)");
+            Out("  /deprovision                       вместе с /apps: не ставить их и новым пользователям (не откатывается)");
+            Out("  /revert[:all|id,id…]               откатить твики и вернуть приложения (по умолчанию — всё из бэкапа)");
             Out("  /dry-run                           только показать, что изменится; ничего не менять");
             Out("  /norestorepoint                    не создавать точку восстановления перед твиками");
             Out("  /log:путь                          куда писать журнал (по умолчанию " + Path.Combine(BackupStore.Folder, "logs") + ")");
@@ -341,19 +419,29 @@ namespace HelloCleanUp
             Out("Примеры:");
             Out("  start /wait HelloCleanUp.exe /tweaks /clean");
             Out("  start /wait HelloCleanUp.exe /tweaks:telemetry-level,start-ads /dry-run");
+            Out("  start /wait HelloCleanUp.exe /apps /dry-run");
             Out("  start /wait HelloCleanUp.exe /revert");
             Out("");
             Out("Коды выхода: 0 — готово, 1 — были ошибки, 2 — ошибка в параметрах, 3 — не создалась точка восстановления (твики не применены).");
             Out("Консольный режим сам не обновляется — для этого есть /update.");
         }
 
-        private static void PrintList(IList<Tweak> tweaks, IList<CleanTarget> targets)
+        private static void PrintList(IList<Tweak> tweaks, IList<CleanTarget> targets, IList<AppEntry> apps)
         {
             Out("Твики (/tweaks, /revert), * — входит в recommended:");
             foreach (var t in tweaks) Out("  " + (t.Recommended ? "* " : "  ") + t.Id.PadRight(24) + t.Title);
             Out("");
             Out("Чистка (/clean), * — входит в recommended:");
             foreach (var t in targets) Out("  " + (t.Recommended ? "* " : "  ") + t.Id.PadRight(24) + t.Title);
+            Out("");
+            Out("Встроенные приложения (/apps, /revert), * — входит в recommended, + — есть на этом компьютере:");
+            var inv = AppxManager.Load();
+            if (inv.Error != null) Out("  (" + inv.Error + ")");
+            foreach (var a in apps)
+            {
+                bool present = inv.Find(a).Any(p => p.ForUser);
+                Out("  " + (a.Recommended ? "*" : " ") + (present ? "+ " : "  ") + a.Id.PadRight(23) + a.Title);
+            }
         }
 
         private static void OpenLog(string path)

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
@@ -18,6 +19,9 @@ namespace HelloCleanUp
         private readonly BackupStore _backup = new BackupStore();
         private readonly ObservableCollection<RowViewModel> _cleanRows = new ObservableCollection<RowViewModel>();
         private readonly ObservableCollection<RowViewModel> _tweakRows = new ObservableCollection<RowViewModel>();
+        private readonly ObservableCollection<RowViewModel> _appRows = new ObservableCollection<RowViewModel>();
+        private readonly IList<AppEntry> _appCatalog = AppCatalog.All();
+        private AppxInventory _apps;
         private readonly StringBuilder _log = new StringBuilder();
         private bool _busy;
 
@@ -33,6 +37,7 @@ namespace HelloCleanUp
             foreach (var t in TweakCatalog.Telemetry()) _tweakRows.Add(new RowViewModel(t));
             CleanList.ItemsSource = _cleanRows;
             TweakList.ItemsSource = _tweakRows;
+            AppList.ItemsSource = _appRows;
 
             Grain.Fill = MakeGrain();
             StateChanged += OnStateChanged;
@@ -51,6 +56,8 @@ namespace HelloCleanUp
                 {
                     ScanAll();
                     RefreshTweakStates();
+                    LoadApps(AppChecks.Recommended);
+                    Status("Готово. Отметь, что убрать, и нажми «Очистить».");
                 });
             };
         }
@@ -181,6 +188,7 @@ namespace HelloCleanUp
             if (PageClean == null) return; // fires during InitializeComponent
             PageClean.Visibility = NavClean.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
             PageTweaks.Visibility = NavTweaks.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+            PageApps.Visibility = NavApps.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
             PageLog.Visibility = NavLog.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
             if (NavLog.IsChecked == true) UpdateBackupInfo();
         }
@@ -245,6 +253,9 @@ namespace HelloCleanUp
             ApplyButton.IsEnabled = on;
             RevertButton.IsEnabled = on;
             RevertAllButton.IsEnabled = on;
+            ReloadAppsButton.IsEnabled = on;
+            RemoveAppsButton.IsEnabled = on;
+            RevertAppsButton.IsEnabled = on;
         }
 
         private void OnUi(Action a) { Dispatcher.Invoke(a); }
@@ -448,6 +459,169 @@ namespace HelloCleanUp
             });
         }
 
+        // ================================================================== preinstalled apps
+
+        private enum AppChecks { Recommended, Keep, Clear }
+
+        /// <summary>Reads the installed apps (slow: PowerShell) and rebuilds the list. Call from background work.</summary>
+        private void LoadApps(AppChecks checks)
+        {
+            Status("Смотрю установленные приложения…");
+            AppxInventory inv;
+            try { inv = AppxManager.Load(); }
+            catch (Exception ex) { inv = new AppxInventory(new List<AppxPackage>(), ex.Message); }
+            if (inv.Error != null) Log("Приложения: " + inv.Error);
+            var removed = AppxManager.RemovedNames(_backup);
+            OnUi(() => BuildAppRows(inv, removed, checks));
+        }
+
+        private void BuildAppRows(AppxInventory inv, IList<string> removed, AppChecks checks)
+        {
+            var wasChecked = new HashSet<string>(_appRows.Where(r => r.IsChecked).Select(r => r.App.Id));
+            _apps = inv;
+            _appRows.Clear();
+            foreach (var e in _appCatalog)
+            {
+                var found = inv.Find(e).Where(p => !AppxManager.IsProtected(p.Name) && !p.NonRemovable).ToList();
+                var removedHere = removed.Where(n => e.Matches(n)).ToList();
+                bool installed = found.Any(p => p.ForUser);
+                bool provisioned = found.Any(p => p.Provisioned);
+                if (!installed && !provisioned && removedHere.Count == 0) continue;
+
+                var description = e.Description;
+                if (e.Names.Count > 1 || e.Names.Any(n => n.EndsWith("*", StringComparison.Ordinal)))
+                {
+                    var names = found.Select(p => p.Name).Concat(removedHere).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                    if (names.Count > 0) description += " Найдено: " + string.Join(", ", names) + ".";
+                }
+
+                bool check;
+                switch (checks)
+                {
+                    case AppChecks.Recommended: check = e.Recommended && installed; break;
+                    case AppChecks.Keep: check = wasChecked.Contains(e.Id); break;
+                    default: check = false; break;
+                }
+                var row = new RowViewModel(e, description, check) { AppInstalled = installed };
+                if (installed) row.SetStatus("установлено", "off");
+                else if (removedHere.Count > 0) row.SetStatus("удалено", "applied");
+                else row.SetStatus("у новых учёток", "partial");
+                _appRows.Add(row);
+            }
+
+            AppsEmptyText.Text = inv.Error != null && inv.Packages.Count == 0
+                ? "Не удалось получить список приложений: " + inv.Error
+                : "Ничего лишнего не нашлось — встроенных приложений из списка на этом компьютере нет.";
+            AppsEmptyText.Visibility = _appRows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private void OnAppsRecommended(object sender, RoutedEventArgs e)
+        {
+            foreach (var r in _appRows) r.IsChecked = r.Recommended && r.AppInstalled;
+        }
+
+        private void OnAppsNone(object sender, RoutedEventArgs e)
+        {
+            foreach (var r in _appRows) r.IsChecked = false;
+        }
+
+        private async void OnReloadApps(object sender, RoutedEventArgs e)
+        {
+            await RunBusy("Смотрю установленные приложения…", () =>
+            {
+                LoadApps(AppChecks.Keep);
+                Status("Список приложений обновлён.");
+            });
+        }
+
+        private async void OnRemoveApps(object sender, RoutedEventArgs e)
+        {
+            if (_apps == null)
+            {
+                StatusText.Text = "Список приложений ещё загружается.";
+                return;
+            }
+            var selected = _appRows.Where(r => r.IsChecked).Select(r => r.App).ToList();
+            if (selected.Count == 0)
+            {
+                StatusText.Text = "Ничего не выбрано.";
+                return;
+            }
+            bool deprovision = DeprovisionCheck.IsChecked == true;
+
+            int changes;
+            var preview = AppxManager.Preview(selected, _apps, deprovision, out changes);
+            if (changes == 0)
+            {
+                StatusText.Text = "Выбранных приложений уже нет — удалять нечего.";
+                return;
+            }
+            var dialog = new PreviewDialog(this, "Что будет удалено",
+                "Изменений: " + changes + ". Каждое удалённое приложение записывается в бэкап — вернуть его можно кнопкой «Вернуть выбранное» или «Откатить всё»." +
+                (deprovision ? " Отметку «не ставить новым пользователям» откатить нельзя: новым учётным записям эти приложения можно будет поставить только из Microsoft Store." : ""),
+                preview, "Удалить");
+            if (dialog.ShowDialog() != true)
+            {
+                StatusText.Text = "Отменено, ничего не удалено.";
+                return;
+            }
+
+            var inv = _apps;
+            await RunBusy("Удаляю приложения…", () =>
+            {
+                Log("— Удаление встроенных приложений —");
+                Log("▸ " + string.Join(", ", selected.Select(a => a.Title)));
+                var errors = AppxManager.Remove(selected, inv, deprovision, _backup, Log);
+                LoadApps(AppChecks.Clear);
+                Log(errors == 0 ? "Готово." : "Готово, но не всё: ошибок — " + errors + ".");
+                Status(errors == 0
+                    ? "Готово. Приложения удалены — вернуть их можно здесь же."
+                    : "Удалил не всё: ошибок — " + errors + ". Подробности в журнале.");
+            });
+        }
+
+        private async void OnRevertApps(object sender, RoutedEventArgs e)
+        {
+            var selected = _appRows.Where(r => r.IsChecked).Select(r => r.App).ToList();
+            if (selected.Count == 0)
+            {
+                StatusText.Text = "Ничего не выбрано. Отметь приложения со статусом «удалено».";
+                return;
+            }
+            var keys = AppxManager.KeysFor(_backup, selected);
+            if (keys.Count == 0)
+            {
+                StatusText.Text = "Среди выбранного нет приложений, удалённых через Hello CleanUp.";
+                return;
+            }
+
+            var storeLinks = new List<StoreLink>();
+            await RunBusy("Возвращаю приложения…", () =>
+            {
+                Log("— Возврат приложений —");
+                var left = AppxManager.Restore(_backup, keys, Log, storeLinks);
+                LoadApps(AppChecks.Clear);
+                Status(left == 0 ? "Готово." : "Вернул не всё — подробности в журнале.");
+            });
+            OfferStore(storeLinks);
+        }
+
+        /// <summary>Apps whose files Windows already deleted can only come back from the Store: offer to open their pages.</summary>
+        private void OfferStore(IList<StoreLink> links)
+        {
+            if (links.Count == 0) return;
+            var text = "Этих приложений в Windows уже нет — вернуть их можно только из Microsoft Store:\n\n" +
+                       string.Join("\n", links.Select(l => "• " + l.Name)) +
+                       "\n\nОткрыть их страницы в Microsoft Store? Ссылки есть и в журнале.";
+            if (MessageBox.Show(this, text, "Hello, CleanUp.", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+                return;
+            foreach (var l in links.Take(10))
+            {
+                try { Process.Start(new ProcessStartInfo(l.Uri) { UseShellExecute = true }); }
+                catch (Exception ex) { Log("Не удалось открыть Microsoft Store: " + ex.Message); }
+            }
+        }
+
         // ================================================================== log page
 
         private async void OnRevertAll(object sender, RoutedEventArgs e)
@@ -457,15 +631,17 @@ namespace HelloCleanUp
                 StatusText.Text = "Откатывать нечего — Hello CleanUp ещё ничего не менял.";
                 return;
             }
-            var answer = MessageBox.Show(this, "Вернуть все настройки, которые менял Hello CleanUp, к исходным?", "Hello, CleanUp.",
+            var answer = MessageBox.Show(this, "Вернуть все настройки и приложения, которые менял Hello CleanUp, как было?", "Hello, CleanUp.",
                 MessageBoxButton.YesNo, MessageBoxImage.Question);
             if (answer != MessageBoxResult.Yes) return;
 
+            var storeLinks = new List<StoreLink>();
             await RunBusy("Откатываю всё…", () =>
             {
                 Log("— Откат всего —");
-                var left = Rollback.RevertAll(_backup, Log);
+                var left = Rollback.RevertAll(_backup, Log, storeLinks);
                 RefreshTweakStates();
+                LoadApps(AppChecks.Clear);
                 if (left == 0)
                 {
                     Status("Всё возвращено как было.");
@@ -476,6 +652,7 @@ namespace HelloCleanUp
                     Status("Откатил не всё: осталось записей — " + left + ". Подробности в журнале.");
                 }
             });
+            OfferStore(storeLinks);
         }
 
         private void OnOpenBackupFolder(object sender, RoutedEventArgs e)

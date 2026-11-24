@@ -70,6 +70,8 @@
                                      IsChecked="True" GroupName="Nav" Checked="OnNav" />
                         <RadioButton x:Name="NavTweaks" Style="{StaticResource NavItem}" Tag="&#xED1A;" Content="Телеметрия и реклама"
                                      GroupName="Nav" Checked="OnNav" />
+                        <RadioButton x:Name="NavApps" Style="{StaticResource NavItem}" Tag="&#xE71D;" Content="Приложения"
+                                     GroupName="Nav" Checked="OnNav" />
                         <RadioButton x:Name="NavLog" Style="{StaticResource NavItem}" Tag="&#xE81C;" Content="Журнал и откат"
                                      GroupName="Nav" Checked="OnNav" />
                     </StackPanel>
@@ -173,6 +175,50 @@
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                         <Button x:Name="RevertButton" Style="{StaticResource GhostButton}" Content="Откатить выбранное" Margin="0,0,12,0" Click="OnRevertSelected" />
                         <Button x:Name="ApplyButton" Style="{StaticResource PrimaryButton}" Content="Применить" Click="OnApply" />
+                    </StackPanel>
+                </Grid>
+            </Grid>
+
+            <!-- ==================================================== page: preinstalled apps -->
+            <Grid x:Name="PageApps" Grid.Row="1" Margin="40,4,40,0" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <StackPanel>
+                    <TextBlock Style="{StaticResource H1}" Text="Встроенные приложения" />
+                    <TextBlock Style="{StaticResource Sub}" Margin="0,4,0,0" MaxWidth="640" HorizontalAlignment="Left" TextWrapping="Wrap"
+                               Text="То, что Windows ставит сама. Показано только то, что есть на этом компьютере. Магазин, Калькулятор, Фото, Блокнот, Paint и системные компоненты не трогаются. Удалённое можно вернуть здесь же или кнопкой «Откатить всё»." />
+                </StackPanel>
+
+                <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,18,0,12">
+                    <Button Style="{StaticResource GhostButton}" Content="Рекомендуемое" Click="OnAppsRecommended" />
+                    <Button Style="{StaticResource GhostButton}" Content="Снять всё" Click="OnAppsNone" />
+                    <Button x:Name="ReloadAppsButton" Style="{StaticResource GhostButton}" Content="Обновить список" Click="OnReloadApps" />
+                </StackPanel>
+
+                <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" Padding="0,0,10,0">
+                    <ItemsControl x:Name="AppList">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <CheckBox Style="{StaticResource CardCheck}" IsChecked="{Binding IsChecked, Mode=TwoWay}" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+                <TextBlock x:Name="AppsEmptyText" Grid.Row="2" Style="{StaticResource Sub}" VerticalAlignment="Top" TextWrapping="Wrap"
+                           Text="Смотрю установленные приложения…" />
+
+                <Grid Grid.Row="3" Margin="0,14,0,18">
+                    <CheckBox x:Name="DeprovisionCheck" Style="{StaticResource StitchCheck}" IsChecked="False" VerticalAlignment="Center"
+                              Margin="0,0,300,0"
+                              Content="Не ставить их и новым пользователям (вернуть это можно будет только через Microsoft Store)" />
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button x:Name="RevertAppsButton" Style="{StaticResource GhostButton}" Content="Вернуть выбранное" Margin="0,0,12,0" Click="OnRevertApps" />
+                        <Button x:Name="RemoveAppsButton" Style="{StaticResource PrimaryButton}" Content="Удалить" Click="OnRemoveApps" />
                     </StackPanel>
                 </Grid>
             </Grid>

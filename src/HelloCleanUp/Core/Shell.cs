@@ -7,7 +7,7 @@ namespace HelloCleanUp.Core
     /// <summary>Runs console tools (sc, schtasks, powershell, dism) hidden and captures output.</summary>
     public static class Shell
     {
-        public static int Run(string file, string args, out string output, int timeoutMs = 120000)
+        public static int Run(string file, string args, out string output, int timeoutMs = 120000, Encoding encoding = null)
         {
             var psi = new ProcessStartInfo(file, args)
             {
@@ -17,6 +17,11 @@ namespace HelloCleanUp.Core
                 RedirectStandardError = true,
                 WindowStyle = ProcessWindowStyle.Hidden
             };
+            if (encoding != null)
+            {
+                psi.StandardOutputEncoding = encoding;
+                psi.StandardErrorEncoding = encoding;
+            }
 
             var sb = new StringBuilder();
             try
@@ -81,8 +86,13 @@ namespace HelloCleanUp.Core
                 @"WindowsPowerShell\v1.0\powershell.exe");
             // With redirected streams PowerShell serializes progress bars ("Preparing modules…", "Creating a restore point… 9%")
             // to stderr as CLIXML, which then gets mixed into the output. Turn progress off and ask for plain text.
-            var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes("$ProgressPreference = 'SilentlyContinue'\r\n" + command));
-            var code = Run(ps, "-NoProfile -NonInteractive -ExecutionPolicy Bypass -OutputFormat Text -EncodedCommand " + encoded, out output, timeoutMs);
+            // Output as UTF-8 too: otherwise Windows' localized (e.g. Russian) error messages arrive garbled.
+            const string prologue =
+                "$ProgressPreference = 'SilentlyContinue'\r\n" +
+                "try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch { }\r\n";
+            var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(prologue + command));
+            var code = Run(ps, "-NoProfile -NonInteractive -ExecutionPolicy Bypass -OutputFormat Text -EncodedCommand " + encoded,
+                           out output, timeoutMs, new UTF8Encoding(false));
             output = StripClixml(output);
             return code;
         }
