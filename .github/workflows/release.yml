@@ -49,6 +49,39 @@ jobs:
           Get-Item out/HelloCleanUp.exe | Format-List Name, Length
           Get-Content out/HelloCleanUp.exe.sha256
 
+      # Runs the real exe on Windows without changing anything: reads installed apps through the Appx module,
+      # previews every tweak and app, scans every cleanup target. Catches broken PowerShell before a release.
+      - name: Smoke test (dry run)
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path out/HelloCleanUp.exe).Path
+          function Invoke-Cli([string[]]$cliArgs, [string]$name) {
+            $log = Join-Path $env:RUNNER_TEMP "$name.log"
+            $p = Start-Process -FilePath $exe -ArgumentList ($cliArgs + "/log:$log") -Wait -PassThru
+            Write-Host "===== HelloCleanUp $($cliArgs -join ' ')  →  код выхода $($p.ExitCode)"
+            if (Test-Path $log) { Get-Content $log -Encoding utf8 | Write-Host } else { Write-Host "(журнала нет)" }
+            if ($p.ExitCode -ne 0) { throw "HelloCleanUp $($cliArgs -join ' ') завершился с кодом $($p.ExitCode)" }
+            return $log
+          }
+          $list = Invoke-Cli @('/list') 'list'
+          if (-not (Select-String -Path $list -Pattern 'candy-crush' -Quiet)) { throw 'в /list нет раздела приложений' }
+          if (Select-String -Path $list -Pattern 'PowerShell не вернул' -Quiet) { throw 'список приложений не прочитался' }
+          Invoke-Cli @('/tweaks:all', '/apps:all', '/deprovision', '/clean:all', '/dry-run') 'dry-run' | Out-Null
+
+          # Real remove → restore cycle on this throwaway runner, with an app Windows images usually carry.
+          $installed = '\*\+ feedback-hub'
+          if (Select-String -Path $list -Pattern $installed -Quiet) {
+            Invoke-Cli @('/apps:feedback-hub') 'remove' | Out-Null
+            $after = Invoke-Cli @('/list') 'list-after-remove'
+            if (Select-String -Path $after -Pattern $installed -Quiet) { throw 'Центр отзывов не удалился' }
+            Invoke-Cli @('/revert:feedback-hub') 'restore' | Out-Null
+            $back = Invoke-Cli @('/list') 'list-after-restore'
+            if (-not (Select-String -Path $back -Pattern $installed -Quiet)) { throw 'Центр отзывов не вернулся' }
+            Write-Host 'Удаление и возврат приложения работают.'
+          } else {
+            Write-Host '::notice::На раннере нет Центра отзывов — проверка удаления и возврата пропущена'
+          }
+
       - uses: actions/upload-artifact@v4
         with:
           name: HelloCleanUp-${{ steps.ver.outputs.version }}
