@@ -7,6 +7,8 @@ namespace HelloCleanUp
     {
         private void OnStartup(object sender, StartupEventArgs e)
         {
+            HelloCleanUp.Core.Updater.CleanupLeftovers();
+
             // Any argument switches to the command-line mode: no window, exit code for scripts.
             if (e.Args.Length > 0)
             {

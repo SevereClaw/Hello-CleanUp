@@ -20,7 +20,7 @@ namespace HelloCleanUp
         private sealed class Options
         {
             public string Tweaks, Clean, Revert, LogPath;
-            public bool DryRun, List, Help, NoRestorePoint;
+            public bool DryRun, List, Help, NoRestorePoint, Update;
         }
 
         private static StreamWriter _file;
@@ -63,6 +63,12 @@ namespace HelloCleanUp
             var tweaks = TweakCatalog.Telemetry();
             var targets = CleanCatalog.All();
             if (o.List) { PrintList(tweaks, targets); return ExitOk; }
+            if (o.Update)
+            {
+                if (o.Tweaks != null || o.Clean != null || o.Revert != null || o.DryRun)
+                    return BadArgs("/update указывается отдельно, без других действий");
+                return SelfUpdate(o);
+            }
 
             if (o.Tweaks == null && o.Clean == null && o.Revert == null)
             {
@@ -210,6 +216,32 @@ namespace HelloCleanUp
 
         // ================================================================== arguments
 
+        private static int SelfUpdate(Options o)
+        {
+            OpenLog(o.LogPath);
+            var current = UpdateCheck.Normalize(Assembly.GetExecutingAssembly().GetName().Version);
+            Out("Hello, CleanUp. v" + current + " — проверяю обновления…");
+            string error;
+            var release = UpdateCheck.Newer(current, out error);
+            if (release == null)
+            {
+                if (error != null) { Out("Не удалось проверить обновления: " + error); return ExitErrors; }
+                Out("Это последняя версия.");
+                return ExitOk;
+            }
+            try
+            {
+                Updater.Install(release, Out);
+            }
+            catch (Exception ex)
+            {
+                Out("Обновление не установлено: " + ex.Message + ". Текущая версия не тронута.");
+                return ExitErrors;
+            }
+            Out("Готово: установлена версия " + release.Version + ", она запустится в следующий раз.");
+            return ExitOk;
+        }
+
         private static bool TryParse(string[] args, out Options o, out string error)
         {
             o = new Options();
@@ -248,6 +280,8 @@ namespace HelloCleanUp
                         o.LogPath = value.Trim('"'); break;
                     case "list":
                         o.List = true; break;
+                    case "update":
+                        o.Update = true; break;
                     case "quiet":
                     case "silent":
                         break; // the command line never shows windows anyway
@@ -301,6 +335,7 @@ namespace HelloCleanUp
             Out("  /norestorepoint                    не создавать точку восстановления перед твиками");
             Out("  /log:путь                          куда писать журнал (по умолчанию " + Path.Combine(BackupStore.Folder, "logs") + ")");
             Out("  /list                              список id твиков и пунктов чистки");
+            Out("  /update                            скачать и установить новую версию, если она вышла");
             Out("  /?                                 эта справка");
             Out("");
             Out("Примеры:");
@@ -309,6 +344,7 @@ namespace HelloCleanUp
             Out("  start /wait HelloCleanUp.exe /revert");
             Out("");
             Out("Коды выхода: 0 — готово, 1 — были ошибки, 2 — ошибка в параметрах, 3 — не создалась точка восстановления (твики не применены).");
+            Out("Консольный режим сам не обновляется — для этого есть /update.");
         }
 
         private static void PrintList(IList<Tweak> tweaks, IList<CleanTarget> targets)

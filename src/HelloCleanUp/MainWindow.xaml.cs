@@ -68,20 +68,63 @@ namespace HelloCleanUp
             MessageBox.Show(this, text, "Hello, CleanUp.", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
 
+        private UpdateCheck.Release _update;
+
         private async void CheckForUpdateAsync()
         {
-            var current = Assembly.GetExecutingAssembly().GetName().Version;
-            var newer = await Task.Run(() => UpdateCheck.NewerVersion(current));
-            if (newer == null) return;
-            UpdateRun.Text = "Есть версия " + newer + " →";
+            var current = UpdateCheck.Normalize(Assembly.GetExecutingAssembly().GetName().Version);
+            string error = null;
+            var release = await Task.Run(() => UpdateCheck.Newer(current, out error));
+            if (release == null) return; // up to date, or offline — not worth a word
+            _update = release;
+            UpdateRun.Text = "Обновить до " + release.Version + " →";
             UpdateText.Visibility = Visibility.Visible;
-            Log("Вышла новая версия " + newer + ": " + UpdateCheck.ReleasesPage);
+            Log("Вышла новая версия " + release.Version + ": " + UpdateCheck.ReleasesPage);
+
+            // Don't interrupt the first scan or anything else that is running.
+            while (_busy) await Task.Delay(300);
+            if (_update == null) return;
+            var answer = MessageBox.Show(this,
+                "Вышла новая версия Hello, CleanUp. — " + release.Version + " (у тебя " + current + ").\n\n" +
+                "Обновить сейчас? Программа скачает её с GitHub, проверит контрольную сумму SHA-256 и перезапустится. " +
+                "Бэкап и возможность отката сохранятся.\n\nЧто нового: " + UpdateCheck.ReleasesPage,
+                "Hello, CleanUp.", MessageBoxButton.YesNo, MessageBoxImage.Information);
+            if (answer == MessageBoxResult.Yes) await InstallUpdate();
         }
 
-        private void OnOpenReleases(object sender, RoutedEventArgs e)
+        private async void OnOpenReleases(object sender, RoutedEventArgs e)
         {
-            try { Process.Start(new ProcessStartInfo(UpdateCheck.ReleasesPage) { UseShellExecute = true }); }
-            catch { StatusText.Text = UpdateCheck.ReleasesPage; }
+            if (_update != null) await InstallUpdate();
+        }
+
+        private async Task InstallUpdate()
+        {
+            var release = _update;
+            if (release == null || _busy) return;
+            bool installed = false;
+            await RunBusy("Скачиваю версию " + release.Version + "…", () =>
+            {
+                Updater.Install(release, Log);
+                installed = true;
+            });
+            if (!installed)
+            {
+                MessageBox.Show(this,
+                    "Не удалось обновиться — подробности в журнале. Текущая версия не тронута.\n\nМожно скачать вручную: " + UpdateCheck.ReleasesPage,
+                    "Hello, CleanUp.", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            _update = null;
+            try
+            {
+                Updater.Restart();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "Новая версия установлена, но не запустилась (" + ex.Message + "). Запусти программу заново.",
+                    "Hello, CleanUp.", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            Application.Current.Shutdown();
         }
 
         // ================================================================== window chrome
