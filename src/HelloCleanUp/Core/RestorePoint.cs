@@ -19,13 +19,21 @@ namespace HelloCleanUp.Core
                 "catch { 'FAIL:' + $_.Exception.Message }";
             string output;
             Shell.PowerShell(script, out output, 600000);
-            output = (output ?? "").Trim();
-            if (output.EndsWith("OK", StringComparison.Ordinal))
+
+            // Look for our own marker line, wherever it is: PowerShell may print other things around it.
+            string fail = null;
+            foreach (var raw in (output ?? "").Split('\n'))
             {
-                log("  точка восстановления «Hello CleanUp» создана");
-                return true;
+                var line = raw.Trim();
+                if (line == "OK")
+                {
+                    log("  точка восстановления «Hello CleanUp» создана");
+                    return true;
+                }
+                if (fail == null && line.StartsWith("FAIL:", StringComparison.Ordinal)) fail = line.Substring(5).Trim();
             }
-            var msg = output.StartsWith("FAIL:", StringComparison.Ordinal) ? output.Substring(5) : output;
+            var msg = fail ?? (output ?? "").Trim();
+            if (msg.Length == 0) msg = "PowerShell ничего не ответил";
             if (msg.IndexOf("1440", StringComparison.Ordinal) >= 0)
             {
                 log("  за последние 24 часа точка уже создавалась — Windows не даёт делать их чаще, используем её");

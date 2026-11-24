@@ -79,8 +79,26 @@ namespace HelloCleanUp.Core
         {
             var ps = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),
                 @"WindowsPowerShell\v1.0\powershell.exe");
-            var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(command));
-            return Run(ps, "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " + encoded, out output, timeoutMs);
+            // With redirected streams PowerShell serializes progress bars ("Preparing modules…", "Creating a restore point… 9%")
+            // to stderr as CLIXML, which then gets mixed into the output. Turn progress off and ask for plain text.
+            var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes("$ProgressPreference = 'SilentlyContinue'\r\n" + command));
+            var code = Run(ps, "-NoProfile -NonInteractive -ExecutionPolicy Bypass -OutputFormat Text -EncodedCommand " + encoded, out output, timeoutMs);
+            output = StripClixml(output);
+            return code;
+        }
+
+        /// <summary>Removes any CLIXML that still slipped through ("#&lt; CLIXML" marker and &lt;Objs …&gt;…&lt;/Objs&gt; blocks).</summary>
+        public static string StripClixml(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return text ?? "";
+            text = System.Text.RegularExpressions.Regex.Replace(text, @"<Objs\b.*?</Objs>", "",
+                System.Text.RegularExpressions.RegexOptions.Singleline);
+            text = text.Replace("#< CLIXML", "");
+            var lines = text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+            var sb = new StringBuilder();
+            foreach (var line in lines)
+                if (line.Trim().Length > 0) sb.AppendLine(line.TrimEnd());
+            return sb.ToString();
         }
     }
 }
